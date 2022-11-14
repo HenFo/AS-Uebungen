@@ -1,0 +1,371 @@
+---
+title: "Adaptive Systeme - Hausaufgabe 1"
+author: "Henry Fock"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+header-includes: 
+  \usepackage{amsmath}
+  \usepackage{float}
+---
+
+```{r setup, include=FALSE}
+library(plotly)
+library(ggplot2)
+library(dplyr)
+library(purrr)
+options(digits=10)
+```
+
+Für reelle Konstanten $a, b$ mit $0.25 \leq a, b \leq 0.75 \in \mathbb{R}$ und $a + b = 1$ lautet die zu optimierende Zielfunktion
+
+
+\begin{align*}
+f:\mathbb{R}^2 &\rightarrow \mathbb{R} \\
+\left(x,y\right)^T &\mapsto f\left(x,y\right) = \sin(ax)\sin(by)\exp\left(-\left(a^2x^2+b^2y^2\right)\right)
+\end{align*}
+
+
+### Aufgabe 1
+
+Visualisieren Sie die Funktion mittels Matlab, Octave oder Gnuplot im Bereich 
+$$U = \left\{\left(x,y\right)^T \in \mathbb{R}^2 | \text{ mit } \left\|\left(x,y\right)^T \right\|_{\infty} < 2\pi\right\}$$
+
+```{r}
+f <- expression(sin(a*x)*sin(b*y)*exp(-(a^2 * x^2 + b^2 * y^2)))
+f.func <- function(x,y,a = 0.75) {
+  b <- 1 - a
+  return(eval(f))
+}
+```
+
+
+\begin{figure}[H]
+  \begin{center}
+  \includegraphics[width=0.75\linewidth]{images/3dplot.png}
+  \end{center}
+\end{figure}
+
+
+
+```{r plot function, eval=FALSE, include=FALSE}
+u <- seq(-2*pi, 2*pi, length.out = 100)
+z <- outer(u,u, f.func)
+plot_ly(x = u, y = u, z=t(z)) %>%
+  add_surface(
+    contours = list(
+      z = list(
+        show=T,
+        start=min(z),
+        end=max(z),
+        usecolormap=TRUE,
+        size=0.03,
+        project=list(z=TRUE)
+        )
+      )
+    ) %>%
+  layout(
+    scene=list(
+      xaxis = list(title = "x"),
+      yaxis = list(title = "y"),
+      zaxis = list(title = "z"),
+      camera=list(
+        eye=list(z=0.5, x=-1)
+      ),
+      aspectratio=list(
+        x=0.75,
+        y=0.75,
+        z=0.75
+      )
+    )
+  )
+```
+
+### Aufgabe 2
+
+Berechnen Sie den Gradientenvektor $\nabla f$ und stellen Sie die Bedingungsgleichungen für die Extremstellen von f auf. Die globalen Maxima und Minima werden innerhalb des Bereichs $U$ angenommen, da $f$ auf Grund der dämpfenden Exponentialfunktion sehr schnell abfällt.
+
+#### Antwort:
+
+\begin{align*}
+\frac{\partial f}{\partial x} &= a\sin(by)\exp\left(-a^2x^2-b^2y^2\right)\left(\cos(ax)-\sin(ax)2ax\right)\\
+\frac{\partial f}{\partial y} &= b\sin(ax)\exp\left(-a^2x^2-b^2y^2\right)\left(\cos(by)-\sin(by)2by\right)
+\end{align*}
+
+
+Die Bedingungsgleichungen lauten:
+
+\begin{align*}
+0 &= \frac{\partial f}{\partial x}\\
+0 &= \frac{\partial f}{\partial y}
+\end{align*}
+
+
+### Aufgabe 3
+
+Die Bedingungsgleichungen aus Teil 2 lassen sich durch geeignete Umformung in eine einzelne äquivalente eindimensionale Gleichung $h_f(u)$ überführen, aus deren Nullstellen $u_*$ sich auch die von $\nabla f(x,y)$ ergeben.
+Wie lautet die Gleichung $h_f$?
+
+#### Antwort:
+
+Da die Gleichungen von $\nabla f$ symmetrisch aufgebaut sind, werden alle Vorkommnisse von $ax$ und $by$ mit $u$ substituiert:
+
+\begin{align*}
+0 &= a\sin(u)\exp\left(-2u^2\right)\left(\cos(u)-\sin(u)2u\right)\\
+0 &= b\sin(u)\exp\left(-2u^2\right)\left(\cos(u)-\sin(u)2u\right)
+\end{align*}
+
+
+Addieren der beiden Gleichungen ergibt:
+
+\begin{align*}
+0 &= (a+b)\left(\sin(u)\exp\left(-2u^2\right)\left(\cos(u)-\sin(u)2u\right)\right)\\
+&= \sin(u)\exp\left(-2u^2\right)\left(\cos(u)-\sin(u)2u\right)
+\end{align*}
+
+Da $a+b = 1$ ist, ergibt sich als Gleichung für $h_f$:
+$$
+h_f(u) = \sin(u)\exp\left(-2u^2\right)\left(\cos(u)-\sin(u)2u\right)
+$$
+
+### Aufgabe 4
+
+Visualisieren Sie die Funktion $h_f(u)$ auf dem Intervall $|u| < 4$ einmal mit und einmal ohne den dämpfenden Exponentialfaktor
+
+```{r, echo=FALSE}
+hf.mit_e <- function(u) sin(u)*exp(-2*u^2)*(cos(u)-sin(u)*2*u)
+hf.ohne_e <- function(u) sin(u)*(cos(u)-sin(u)*2*u)
+hf <- tibble(
+  u = c(-4,4)
+)
+
+ggplot(hf, aes(x=u)) +
+  stat_function(aes(color="mit e"), fun=hf.mit_e) +
+  stat_function(aes(color="ohne e"), fun=hf.ohne_e) +
+  theme_bw()
+
+```
+
+### Aufgabe 5
+
+Bestimmen Sie die globalen Extrema von $f(x,y)$ auf 10 Stellen genau mit einem geeigneten Iterationsverfahren
+
+#### Antwort:
+
+Implementieren des Newton-Verfahrens:
+```{r}
+find.zeros <- function(start.vec, expr, namevec, precision = 1e-10, max.iter = 20) {
+  grads <- deriv(expr, namevec, function.arg = T)
+  
+  xk <- start.vec
+  xkp <- start.vec
+  delta <- Inf
+  k <- 0
+  
+  while(delta > precision && k < max.iter) {
+    grad.calc <- do.call(grads, as.list(xk))
+    gradient <- t(attr(grad.calc, "gradient"))
+    xkp <- xk - grad.calc / gradient
+    
+    delta <- norm(xk - xkp)
+    xk <- xkp
+    k <- k+1
+  }
+  
+  return(xkp)
+}
+```
+
+Suche Nullstellen der eindimensionalen Funktion $h_f(u)$:
+```{r}
+h <- expression(sin(u)*exp(-2*u^2)*(cos(u)-sin(u)*2*u))
+start.vec <- matrix(c(0.5))
+h.zero <- find.zeros(start.vec, h, c("u"))[[1]]
+h.zero
+```
+Die Nullstellen von $h_f(u)$ befinden sich an $u_* = `r h.zero`$ und $`r -h.zero`$, da die Funktion punktsymmetrisch ist. Eine weitere (triviale) Nullstelle befindet sich an $u_* = 0$.
+
+Als nächstes muss die Substitution aufgelöst werden, um Werte für $x$ und $y$ zu erhalten.
+Es gilt $x_* = \frac{u_*}{a}$ und $y_* = \frac{u_*}{b}$. Daraus ergeben sich die Nullstellen von $\nabla f$.
+
+
+### Aufgabe 6
+
+Zeigen Sie, ob es sich bei den Extrema um Minima oder Maxima handelt, mittels der Auswertung der Hessematrix $H_f$.
+
+#### Antwort:
+
+```{r, include=FALSE}
+a <- 0.75
+b <- 1 - a
+x.null <- h.zero / a
+y.null <- h.zero / b
+```
+
+Wähle für $a =$ `r a` und $b =$ `r b`. Berechne Nullstellen für $x$ un $y$ als:
+\begin{align*}
+x_0 &= \frac{\pm`r h.zero`}{`r a`} = \pm`r x.null`\\
+y_0 &= \frac{\pm`r h.zero`}{`r b`} = \pm`r y.null`
+\end{align*}
+
+
+```{r, echo=FALSE}
+f.grads <- deriv3(f, c("x", "y"), function.arg = T)
+get.hesse <- function(x,y) matrix(attr(f.grads(x,y), "hessian"), nrow = 2)
+hesse1 <- get.hesse(x.null, y.null)
+hesse2 <- get.hesse(-x.null, y.null)
+hesse3 <- get.hesse(x.null, -y.null)
+hesse4 <- get.hesse(-x.null, -y.null)
+# hesse5 <- get.hesse(0, y.null)
+# hesse6 <- get.hesse(x.null, 0)
+# hesse7 <- get.hesse(0, -y.null)
+# hesse8 <- get.hesse(-x.null, 0)
+hesse0 <- get.hesse(0,0)
+
+hessians <- list(
+  hesse1, 
+  hesse2, 
+  hesse3, 
+  hesse4, 
+  hesse0
+)
+```
+
+Die Hessematrizen ergeben sich aus der Kombination der positiven und negativen Nullstellen, sowie der Stelle $(0,0)^T$.
+
+\begin{align*}
+H_f(`r x.null`, `r y.null`) &=
+\begin{pmatrix}
+`r hesse1[1]` & `r hesse1[2]` \\
+`r hesse1[3]` & `r hesse1[4]`
+\end{pmatrix} \\
+H_f(`r -x.null`, `r y.null`) &=
+\begin{pmatrix}
+`r hesse2[1]` & `r hesse2[2]` \\
+`r hesse2[3]` & `r hesse2[4]`
+\end{pmatrix} \\
+H_f(`r x.null`, `r -y.null`) &=
+\begin{pmatrix}
+`r hesse3[1]` & `r hesse3[2]` \\
+`r hesse3[3]` & `r hesse3[4]`
+\end{pmatrix} \\
+H_f(`r -x.null`, `r -y.null`) &=
+\begin{pmatrix}
+`r hesse4[1]` & `r hesse4[2]` \\
+`r hesse4[3]` & `r hesse4[4]`
+\end{pmatrix} \\
+H_f(0,0) &=
+\begin{pmatrix}
+`r hesse0[1]` & `r hesse0[2]` \\
+`r hesse0[3]` & `r hesse0[4]`
+\end{pmatrix}
+\end{align*}
+
+
+Als nächstes werden die Abschnittsdeterminanten berechnet und die definitheit bestimmt.
+Diese sind wie folgt:
+```{r, echo=FALSE, message=TRUE}
+zeros <- list(matrix(c(x.null, y.null)), 
+              matrix(c(-x.null, y.null)), 
+              matrix(c(x.null, -y.null)), 
+              matrix(c(-x.null, -y.null)), 
+              matrix(c(0,0)))
+for (i in seq_along(hessians)) {
+  mat <- hessians[[i]]
+  z <- zeros[[i]]
+  cat("Nullstelle:\n")
+  print(z)
+  cat("\nHessian:\n")
+  print(mat)
+  sec.det <- vector("double", 2)
+  sec.det[1] <- det(as.matrix(mat[1,1]))
+  sec.det[2] <- det(mat)
+  cat("\nAbschnittsdeterminanten:\n")
+  print(sec.det)
+  if (sec.det[1] > 0 && sec.det[2] > 0)
+    cat("\npositiv definit! \n")
+  else if (sec.det[1] < 0 && sec.det[2] > 0)
+    cat("\nnegativ definit! \n")
+  else
+    cat("\nindefinit! \n")
+  cat("---------- \n")
+}
+```
+
+
+### Optionale Lösung von $f(x,y)$ mittels Newton-Verfahren für mehrdimensionale Gleichungen
+
+Implementierung der mehrdimensionalen Optimierung mittels Newton-Verfahren:
+```{r}
+find.extrema <- function(start.vec, grads, precision = 1e-10, max.iter = 20, rate = 0.5) {
+  xk <- start.vec
+  xkp <- start.vec
+  delta <- Inf
+  k <- 0
+  
+  while(delta > precision && k < max.iter) {
+    grad.calc <- do.call(grads, as.list(xkp))
+    grad <- t(attr(grad.calc, "grad"))
+    hesse <- matrix(attr(grad.calc, "hessian"), nrow = length(start.vec))
+    
+    hesse.inv <- solve(hesse)
+    
+    # Updaterate musste verringert werden, da die Schritte zu groß für die Funktion wurden
+    xkp <- xk - rate * (hesse.inv %*% grad)
+    delta <- norm(xk - xkp)
+    xk <- xkp
+    k <- k+1
+  }
+  
+  return(round(xkp, digits = 10))
+}
+
+```
+
+Implementiere Funktion zum überprüfen der Hessematrix:
+```{r}
+check.hesse <- function(extrema.vec, grads) {
+  grad.calc <- do.call(grads, as.list(extrema.vec))
+  hesse <- matrix(attr(grad.calc, "hessian"), nrow = length(extrema.vec))
+  
+  section.det <- vector("double", nrow(hesse))
+  for (i in seq_len(nrow(hesse))) {
+    section <- round(as.matrix(hesse[1:i, 1:i]), digits = 10)
+    section.det[i] <- det(section)
+  }
+  
+  definit.pos <- all(section.det > 0)
+  definit.neg <- all(section.det[seq(1, length(section.det), 2)] < 0) &&
+    all(section.det[seq(2, length(section.det), 2)] > 0)
+  
+  if (definit.pos)
+    return("positiv definit")
+  else if(definit.neg)
+    return("negativ definit")
+  else
+    return("indefinit")
+}
+```
+
+Festlegen der Parameter:
+```{r}
+f <- expression(sin(a*x)*sin(b*y)*exp(-(a^2 * x^2 + b^2 * y^2)))
+a <- 0.75
+b <- 1 - a
+vars <- c("x", "y")
+start.vec <- matrix(c(1,1))
+```
+
+Suchen eines Extrema:
+```{r}
+f.gradients <- deriv3(f, vars, function.arg = T)
+(f.extrema <- find.extrema(start.vec, f.gradients, rate = 0.5))
+(max_min <- check.hesse(f.extrema, f.gradients))
+```
+
+Extrema wurde an $x = `r f.extrema[1]`$ und $y = `r f.extrema[2]`$ gefunden.
+Die Hessematrix ist an der gefundenen Stelle `r max_min`.
+
+
+
