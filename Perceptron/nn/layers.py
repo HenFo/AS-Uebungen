@@ -17,11 +17,19 @@ class Layer(ABC):
 
 
 class Linear(Layer):
-    def __init__(self, num_inputs: int, num_outputs: int) -> None:
+    def __init__(self, num_inputs: int, num_outputs: int, weight_init:str = "uniform") -> None:
+        assert weight_init in ("uniform", "normal")
+
         self.num_inputs = num_inputs
         self.num_inputs = num_outputs
 
-        self.weights = np.random.randn(num_inputs + 1, num_outputs)
+        if weight_init == "uniform":
+            self.weights = np.random.rand(num_inputs + 1, num_outputs)
+        if weight_init == "normal":
+            self.weights = np.random.randn(num_inputs + 1, num_outputs)
+        
+        # self.weights *= np.sqrt(1.0 / num_inputs)
+
         self.weight_gradients: np.ndarray = None
 
         self.train_input: np.ndarray = None
@@ -60,6 +68,50 @@ class Sigmoid(Layer):
 
     def backwards(self, prev_grads: np.ndarray) -> np.ndarray:
         grads = self.train_output * (1 - self.train_output)
+        return prev_grads * grads
+
+    def train(self, *_) -> None:
+        self.train_input = None
+        self.train_output = None
+
+class LeakyReLu(Layer):
+    def __init__(self, leak:float = 0.2) -> None:
+        self.train_input: np.ndarray = None
+        self.train_output: np.ndarray = None
+        self.leak:float = leak
+    
+    def forward(self, x: np.ndarray, train: bool = False) -> np.ndarray:
+        out = x.copy()
+        out[out < 0] *= self.leak
+        if train:
+            self.train_input = x
+            self.train_output = out
+        return out
+
+    def backwards(self, prev_grads: np.ndarray) -> np.ndarray:
+        grads = np.ones_like(self.train_input)
+        grads[self.train_output == 0] = self.leak
+        return prev_grads * grads
+
+    def train(self, *_) -> None:
+        self.train_input = None
+        self.train_output = None
+
+
+class Tanh(Layer):
+    def __init__(self) -> None:
+        self.train_input: np.ndarray = None
+        self.train_output: np.ndarray = None
+    
+    def forward(self, x: np.ndarray, train: bool = False) -> np.ndarray:
+        out = np.tanh(x)
+        if train:
+            self.train_input = x
+            self.train_output = out
+        return out
+
+    def backwards(self, prev_grads: np.ndarray) -> np.ndarray:
+        grads = 2 / (np.cosh(2 * self.train_input) + 1)
         return prev_grads * grads
 
     def train(self, *_) -> None:

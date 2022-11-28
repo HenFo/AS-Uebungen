@@ -1,4 +1,3 @@
-from abc import ABC, abstractmethod
 from typing import *
 
 import numpy as np
@@ -39,7 +38,7 @@ class MultiLayerPerceptron:
         lr: float = 0.01,
         batch_size: int = 1,
         loss_threshold: float = 1e-2,
-        shuffle: bool = True,
+        shuffle: bool = True
     ):
         epoch: int = 1
         while epoch <= epochs:
@@ -63,3 +62,4 @@ class MultiLayerPerceptron:
 
             epoch += 1
 
+        print(f"number epochs: {epoch-1}")
