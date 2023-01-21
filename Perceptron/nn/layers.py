@@ -24,9 +24,9 @@ class Linear(Layer):
         self.num_inputs = num_outputs
 
         if weight_init == "uniform":
-            self.weights = np.random.rand(num_inputs + 1, num_outputs)
+            self.weights = np.random.rand(num_outputs, num_inputs + 1)
         if weight_init == "normal":
-            self.weights = np.random.randn(num_inputs + 1, num_outputs)
+            self.weights = np.random.randn(num_outputs, num_inputs + 1)
         
         # self.weights *= np.sqrt(1.0 / num_inputs)
 
@@ -37,15 +37,15 @@ class Linear(Layer):
 
     def forward(self, x: np.ndarray, train: bool = False) -> np.ndarray:
         x_bias = np.vstack([np.ones((1, 1)), x])
-        out = np.dot(self.weights.T, x_bias)
+        out = np.dot(self.weights, x_bias)
         if train:
             self.train_input = x_bias
             self.train_output = out
         return out
 
     def backwards(self, prev_grads: np.ndarray) -> np.ndarray:
-        self.weight_gradients = np.dot(prev_grads, self.train_input.T).T
-        return np.dot(self.weights[1:], prev_grads)
+        self.weight_gradients = np.dot(prev_grads, self.train_input.T)
+        return np.dot(self.weights[:,1:].T, prev_grads)
 
     def train(self, lr: float = 0.01) -> None:
         self.weights -= lr * self.weight_gradients
