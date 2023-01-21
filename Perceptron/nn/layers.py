@@ -30,7 +30,8 @@ class Linear(Layer):
         
         # self.weights *= np.sqrt(1.0 / num_inputs)
 
-        self.weight_gradients: np.ndarray = None
+        self.weight_gradients: np.ndarray = np.zeros_like(self.weights)
+        self.num_samples:int = 0
 
         self.train_input: np.ndarray = None
         self.train_output: np.ndarray = None
@@ -44,14 +45,17 @@ class Linear(Layer):
         return out
 
     def backwards(self, prev_grads: np.ndarray) -> np.ndarray:
-        self.weight_gradients = np.dot(prev_grads, self.train_input.T)
+        self.weight_gradients = np.add(self.weight_gradients, np.dot(prev_grads, self.train_input.T))
+        self.num_samples += 1
         return np.dot(self.weights[:,1:].T, prev_grads)
 
     def train(self, lr: float = 0.01) -> None:
-        self.weights -= lr * self.weight_gradients
-        self.weight_gradients = None
+        if self.num_samples > 0:
+            self.weights -= lr * (self.weight_gradients / self.num_samples)
+        self.weight_gradients = np.zeros_like(self.weights)
         self.train_input = None
         self.train_output = None
+        self.num_samples = 0
 
 
 class Sigmoid(Layer):

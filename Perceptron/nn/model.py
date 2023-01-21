@@ -44,6 +44,7 @@ class MultiLayerPerceptron:
         while epoch <= epochs:
             losses = []
             xs, ys = x, y
+            batch_count:int = 0
             if shuffle:
                 xs, ys = Dataset.shuffle(x, y)
             for sample_x, sample_y in zip(xs, ys):
@@ -52,7 +53,12 @@ class MultiLayerPerceptron:
                 losses.append(loss)
 
                 self._backpropegate()
-                self._update_weights(lr)
+                batch_count += 1
+                if batch_count % batch_size == 0:
+                    self._update_weights(lr)
+                    batch_count = 0
+            
+            self._update_weights(lr)
 
             mean_loss = np.mean(np.array(losses))
             if epoch % 100 == 0:
