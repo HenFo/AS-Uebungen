@@ -1,0 +1,203 @@
+---
+title: "Adaptive Systeme - Hausaufgabe 3"
+author: "Henry Fock"
+date: '`r Sys.Date()`'
+output:
+  pdf_document:
+    extra_dependencies:
+      subcaption: null
+      caption: null
+      bbold: null
+---
+
+## Ein einfaches Feed Forward Netz
+
+Klassische Feed Forward Netze (FFN) bestehen aus einer Aneinanderreihung von Matrix-Vektor Multiplikationen, gefolgt von einer nicht-linearen Aktivierungsfunktion.
+Im Training erhält das Netzwerk einen Input $x$ und einen erwarteten Output $y$.
+Das Netzwerk hat einen Aufbau von $l$ Schichten, bestehend aus einer Gewichtematrix $W^{(k)}$ mit $k\in \{1,\ldots , l\}$, einem Input $h^{(k-1)}$, wobei $h^{(0)} = x$, einem Bias $b^{(k)}$ und einer Aktivierungsfunktion $f:\mathbb{R} \rightarrow \mathbb{R}$ besteht.
+Das Ergebnis pro Schicht wird berechnet aus:
+\begin{align}
+a^{(k)} &= W^{(k)} h^{(k-1)} + b^{(k)} \label{eq:lin_step} \\
+h^{(k)} &= f\left(a^{(k)}\right) \label{eq:nonlin_step} \\
+\hat{y} &= h^{(l)} \nonumber
+\end{align}
+Nach Beendigung der letzten Schicht wird der Fehler des Netzwerkes zum erwarteten Ergebnis berechnet.
+Die dazu verwendete Fehlerfunktion wir mit $\mathcal{L}\left(\hat{y}, y\right)$ bezeichnet.
+
+Um das Netz zu trainieren, müssen die Gradienten der Funktionen mit Bezug auf den Fehler berechnet werden.
+Formel \ref{eq:lin_step} benötigt eine mit Bezug auf die Gewichte, um diese zu ändern und eine mit Bezug auf den Eingang, um den Gradienten in die darüberliegenden Schichten weiterzuleiten.
+Die Gradienten lassen sich über die Kettenregel berechnen:
+\begin{equation}
+\label{eq:chainrule}
+\begin{aligned}
+\frac{\partial \mathcal{L}}{\partial W^{(l)}} &= \frac{\partial a^{(l)}}{\partial W^{(l)}} \cdot \frac{\partial h^{(l)}}{\partial a^{(l)}} \cdot \frac{\partial \mathcal{L}}{\partial h^{(l)}}  \\
+\delta^l &= \frac{\partial h^{(l)}}{\partial a^{(l)}} \cdot \frac{\partial \mathcal{L}}{\partial h^{(l)}} \\
+\frac{\partial \mathcal{L}}{\partial W^{(l-1)}} &= \frac{\partial a^{(l-1)}}{\partial  W^{(l-1)}}\cdot \frac{\partial h^{(l-1)}}{\partial a^{(l-1)}} \cdot \frac{\partial a^{(l)}}{\partial h^{(l-1)}} \cdot \delta^l \\
+\delta^{l-1} &= \frac{\partial h^{(l-1)}}{\partial a^{(l-1)}} \cdot \frac{\partial a^{(l)}}{\partial h^{(l-1)}} \cdot \delta^l
+\end{aligned}
+\end{equation}
+$\delta^{(k)}$ bezeichnet hier die Gradienten der vorherigen Schichten, wenn das Netz rückwärts durchlaufen wird.
+Für den Bias ist die Berechnung des Gradienten analog zu den anderen Gewichten.
+Als "Input" wird hier $1$ verwendet.
+
+Beim so genannten "mini batch gradient descent" werden bspw. 16 Datensätze durch das Netz geschickt, zu jedem der Fehler und die dazugehörigen Gradienten berechnet, aber erst nachdem der letzte Gradient berechnet wurde, werden die Gewichte geupdatet.
+Um ein gemeinsames update zu machen, werden die Gradienten für die Gewichtupdates aufsummiert und je nach implementierung normiert.
+Folgend ist ein Ausschnitt einer Implementierung für den Rückwärtsschritt in einer voll vernetzten Schicht:
+```{python eval=FALSE}
+# ...
+def backwards(self, prev_grads: np.ndarray) -> np.ndarray:
+    self.weight_gradients = np.add(
+    	self.weight_gradients, np.dot(prev_grads, self.train_input.T))
+    self.num_samples += 1
+    return np.dot(self.weights[:,1:].T, prev_grads)
+
+def train(self, lr: float = 0.01) -> None:
+    if self.num_samples > 0:
+        self.weights -= lr * (self.weight_gradients / self.num_samples)
+```
+
+## Convolutional layer
+\label{subsec:conv}
+Eine Convolutional (deutsch: Faltungs-) Schicht, besitzt die Eigenschaft nicht voll vernetzt zu sein.
+Es werden immer nur ein paar Inputs zu einem neuen Wert zusammengefasst, im Gegensatz zur Vollvernetzten Schicht, bei der alle Inputs zu einem Ergebnis geformt werden.
+Bei einer Faltung in einem Bild wird bspw. ein Fenster von $3\times 3$ über das Gesammte Bild gezogen und die Faltung berechnet. 
+Das Ergebnis ist ein neues Bild, bei dem jedes Pixel das Ergebnis aus der Faltung im durch das Fenster ist.
+Rechnerisch ist es so, als würde man ein Neuron mit $9$ Eingängen und einem Ausgang über das Bild schieben.
+Die einzelnen Fenster können als individuelle Datensätze aufgefasst werden, wodurch dies das Selbe Prinzip wie beim "mini batch" ist.
+Um Also die Gradienten für die Gewichte zu bilden, müssen lediglich die Gradienten der Gewichte mit jedem Fenster als Input gebildet und aufsummiert werden.
+
+Schwieriger ist das Weiterleiten der Gradienten in die nächst höhere Schicht.
+\begin{figure}[htb]
+     \centering
+     \begin{subfigure}[t]{0.49\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{images/manuell_gradients.png}
+         \caption{Gleichungen für die manuelle bildung der Ableitungens}
+         \label{fig:grad_manuell}
+     \end{subfigure}
+     \hfill
+     \begin{subfigure}[t]{0.49\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{images/conv_grads.png}
+         \caption{Erzeugen der Gradienten über Faltungsopperation\\}
+         \label{fig:grad_conv}
+     \end{subfigure}
+    \caption{Bilden der Gradienten mit Hilfe der Faltung über die Gewichte}
+    \label{fig:grads_for_conv}
+\end{figure}
+Abbildung \ref{fig:grad_manuell} zeigt, wie die Gradienten für die nächste Schicht gebildet werden, nämlich der Vorherige Gradient mal dem Gewicht, mit dem der Input das Ergebnis des Outputs beeinflusst hat.
+Dabei ist zu beachten, dass die schwarzen und gelben Verbindungen die selben Gewichte besitzen (In blau beschriftet)!
+Diese Berechnung lässt sich mit Hilfe einer Faltung widerspiegeln.
+Dafür werden die Gewichte einmal um 180° im Filter gedreht(!) und eine "Volle-Faltung" auf die Gradienten angewendet.
+An Stellen, wo der Filter keinen Gradienten zum Matchen hat, wird dieser mit $0$ Multipliziert.
+Der Ablauf ist in Abbildung \ref{fig:grad_conv} dargestellt.
+Wie man sehen kann, ist die Berechnung exakt die selbe, wie in Abbildung \ref{fig:grad_manuell}.
+
+## Max- Average Pooling
+Pooling-Operationen fassen ein Eingabefenster zu einer Ausgabe zusammen, ohne Verwendung von Gewichten.
+Der Gradient beschreibt, welchen Einfluss ein Parameter auf das Ergebnis hatte.
+Bei einem Max-Pooling, wird lediglich der höchste Wert im Fenster weitergegeben, weshalb auch nur dieser einen Einfluss auf das Ergebnis hat.
+Damit gilt, wenn $x_i$ der höchste Wert ist:
+\begin{equation}
+\label{eq:grad_max}
+	\nabla \max\left(x_1, x_2,\ldots, x_n\right) = \delta_{i,k}, \text{mit} i,k \in \{1,\ldots,n\}
+\end{equation}
+Beim Max-Pooling ist der Gradient $1$ für den höchsten Wert im Fenster, $0$ für alle anderen.
+In Formel \ref{eq:grad_max} wird dies durch das Kronecker-Delta beschrieben.
+Beim Average-Pooling gilt:
+\begin{equation}
+\label{eq:grad_avg}
+	\nabla \frac{1}{n}\cdot\left(x_1 + x_2 +\ldots + x_n\right) = \frac{1}{n}
+\end{equation}
+Beim Average-Pooling werden die Gradienten wieder mit Hilfe der Faltung berechnet.
+Das Vorgehen ist das Selbe, wie in der Faltungsschicht, nur werden als Gewichte $\frac{1}{n}$ verwendet, wobei $n$ die Anzahl der Felder im Filter sind.
+
+## Aktivierungs-/Transferfunktionen
+\label{subsec:transfer}
+Transferfunktionen sind nicht lineare Funktionen $f:\mathbb{R} \rightarrow \mathbb{R}$ (Verwendung in Formel \ref{eq:nonlin_step}).
+$f$ wird auf jedes Element im Input angewendet.
+Um die Gradienten zu bestimmen muss also die Ableitung von $f$ bestimmt werden und auf alle Inputs angewendet werden.
+Die meist verwendeten Transferfunktionen sind die Rectified Linear Unit (ReLU) und die Sigmoid-/Fermi-Funktion:
+\begin{align}
+    \text{ReLU}(x) &= 
+        \begin{cases}
+            x & if x > 0 \\
+            0 & else
+        \end{cases} \label{eq:relu} \\
+    \sigma(x) &= \frac{1}{1+e^{-x}} \label{eq:sigma} \\
+\end{align}
+Die Ableitungen sind wie folgt:
+\begin{align}
+    \frac{d \text{ReLU}(x)}{d x} &= 
+        \begin{cases}
+            1 & if x > 0 \\
+            0 & else
+        \end{cases} \label{eq:grad_relu}\\
+    \frac{d \sigma(x)}{d x} &= \sigma(x)\cdot (1 - \sigma(x)) \label{eq:grad_sigma}
+\end{align}
+
+# Berechnung der Gradienten in LeNet
+Das LeNet hat eine simple Architektur, bestehend aus zwei 2D-Faltungsschichten, denen jeweils eine Sigmoid-Aktivierung und ein Average-Pooling folgt.
+Das Ergebnis wird in einen eindimensionalen Vektor transformiert und durch 3 voll vernetzte Schichten geleitet, jede gefolgt von einer Sigmoid-Aktivierung.
+\begin{figure}[htb]
+\begin{center}
+    \includegraphics[width=\textwidth]{images/lenet_architecture.png}
+\end{center}
+\caption{Architeckur des LeNets (Entnommen aus LeNet Paper)}
+\label{fig:lenet_arch}
+\end{figure}
+Abbildung \ref{fig:lenet_arch} zeigt den Aufbau der Architektur.
+
+Folgend sollen die Berechnungsschritte für den Gradient-Descent Algorithmus aufgeführt werden.
+Gegeben sei der Gradient des berechneten Outputs mit Bezug auf den Fehler $\frac{\partial \mathcal{L}}{\partial \hat{y}}$.
+Zuerst müssen die Gradienten durch die voll vernetzten Schichten getragen werden.
+Das Vorgehen dazu ist bereits in den Formeln \ref{eq:chainrule} gegeben.
+Im Flattening-Schritt (vgl. S4 - S5 in Abbildung \ref{fig:lenet_arch}) werden die berechneten Gradienten der Knoten in die zugehörigen Zellen in der Matrix eingetragen.
+Als nächstes muss der Gradient durch die Average-Pooling Layer geleitet werden.
+Im einfachen Fall geschieht dies, wie in Abschnitt \ref{subsec:transfer} beschrieben.
+Im LeNet läuft das Fenster für das Pooling nicht nur einen Schritt, sondern die Fenster sind so gewählt, dass diese sich nicht überlappen.
+Daher muss die Matrix der Gradienten (Jaccobi-Matrix) erst vergrößert werden, hier um das doppelte, da das Pooling die Layer zuvor halbiert hat.
+\begin{figure}[h]
+\begin{center}
+    \includegraphics[width=0.5\textwidth]{images/uppooling.png}
+\end{center}
+\caption{Vergrößern der Matrix}
+\label{fig:uppooling}
+\end{figure}
+In Abbildung \ref{fig:uppooling} wird das Vergrößern illustriert.
+Anschließend kann eine Faltung mit den selben Eigenschaften, wie das Pooling und einem Filter entsprechend $\frac{1}{n}$ an jeder Stelle, durchgeführt werden, um die Gradienten durch das Pooling zu erhalten.
+
+Als nächstes geht jeder einzelne Gradient durch die Ableitung der Transferfunktion.
+Die Bildmatrix bleibt dadurch in allen Dimensionen erhalten.
+Als nächstes folgen die Gradienten durch die Faltung.
+Hier muss einmal der Gradient von $\mathcal{L}$ mit Bezug auf den Filter und einmal mit Bezug auf den Input $h$ berechnet werden.
+Für beides kann die Faltungsoperation verwendet werden.
+Um den Gradienten des Filters ($\frac{\partial \mathcal{L}}{\partial F}$) zu berechnen, berechnet man die Faltung vom Input, mit der soeben berechneten Jaccobi-Matrix als Filter.
+Das Ergebnis entspricht exakt den Dimensionen des verwendeten Filters.
+Dies entspricht genau dem aufsummieren der einzelnen Gradienten für jedes Fenster, wie in Abschnitt \ref{subsec:conv} beschrieben.
+Der Gradient für die nächste Schicht wird wie in Abschnitt \ref{subsec:conv} berechnet.
+D.h. eine "volle Faltung" (Padding von 2 Feldern um die Matrix) mit einem um 180° gedrehtem Filter.
+Dieses verfahren wiederholt sich für die die nächste Gruppe von Pooling, Aktivierung und Faltung.
+In Abbildung \ref{fig:lenet_fw_bw} wird für einen simplifizierten Aufbau des LeNets der Vorwärts und Rückwärtsschritt berechnet, der die Erklärung exemplarisch unterstützen soll.
+Die GRadienten wurden schnell ähnlich, da hier stark gerundet wurde und die Änderungen im hinteren Kommabereich erst bemerkbar sind.
+\begin{figure}[hb]
+    \centering
+    \begin{subfigure}[t]{\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/lenet_einfach_fw.png}
+        \caption{Der Vorwärtsschritt in einem simplifizierten LeNet}
+        \label{fig:lenet_fw}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/lenet_einfach_bw}
+        \caption{Durchgerechnetes Backpropegation für ein simplifiziertes LeNet}
+        \label{fig:lenet_bw}
+    \end{subfigure}
+    \caption{Berechnung des Vorwärts- und Rückwärtsschrittes eines simplifizierten LeNets}
+    \label{fig:lenet_fw_bw}
+\end{figure}
+
+
+
