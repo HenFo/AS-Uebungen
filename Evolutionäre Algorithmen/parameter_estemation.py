@@ -1,13 +1,19 @@
+import os
 from abc import ABC, abstractclassmethod
 from functools import total_ordering
+from multiprocessing import Pool, freeze_support
 from typing import Any, Callable
+
 import numpy as np
+from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map
 
 
 class Gene(ABC):
-	def __init__(self, allele:Any) -> None:
+	def __init__(self, allele:Any, mutation_rate:float) -> None:
 		super().__init__()
 		self.allele = allele
+		self.mutation_rate = mutation_rate
 
 	@abstractclassmethod
 	def mutate(self) -> "Gene":
@@ -21,11 +27,14 @@ class Gene(ABC):
 
 
 class FloatGene(Gene):
-	def __init__(self, allele:float = None, mutation_rate:float = 0.2, range:tuple = (-np.inf, np.inf), mutation_sd:float = 1) -> None:
-		allele = np.random.normal() if allele is None else allele
-		super().__init__(allele)
-		self.range = range
-		self.mutation_rate = mutation_rate
+	def __init__(self, allele:float = None, mutation_rate:float = 0.2, range:tuple = None, mutation_sd:float = 1) -> None:
+		if range is None:
+			allele = np.random.normal() if allele is None else allele
+		else:
+			allele = np.random.uniform(range[0], range[1]) if allele is None else allele
+
+		super().__init__(allele, mutation_rate)
+		self.range = (-np.inf, np.inf) if range is None else range
 		self.mutation_sd = mutation_sd
 	
 	def mutate(self) -> "FloatGene":
@@ -40,13 +49,31 @@ class FloatGene(Gene):
 class BinaryGene(Gene):
 	def __init__(self, allele:int = None, mutation_rate:float = 0.2) -> None:
 		allele = allele if allele is not None else 0 if np.random.random() < 0.5 else 1
-		super().__init__(allele)
-		self.mutation_rate = mutation_rate
+		super().__init__(allele, mutation_rate)
 
 	def mutate(self) -> "BinaryGene":
 		mut_allele = self.allele if np.random.random() > self.mutation_rate else (self.allele + 1) % 2
 		return BinaryGene(mut_allele, self.mutation_rate)
 
+
+class IntGene(Gene):
+	def __init__(self, allele: int = None, mutation_rate:float = 0.2, range:tuple = None, mutation_span:float = (-5,5)) -> None:
+		if range is None:
+			allele = np.random.randint(0, 100) if allele is None else allele
+		else:
+			allele = np.random.randint(range[0], range[1]) if allele is None else allele
+
+		super().__init__(allele, mutation_rate)
+		self.range = range
+		self.mutation_span = mutation_span
+	
+	def mutate(self) -> "IntGene":
+		mut_allele = self.allele if np.random.random() > self.mutation_rate \
+			else self.allele + np.random.randint(self.mutation_span[0], self.mutation_span[1])
+		mut_allele = mut_allele if mut_allele < self.range[1] else self.range[1]
+		mut_allele = mut_allele if mut_allele > self.range[0] else self.range[0]
+
+		return IntGene(mut_allele, self.mutation_rate, self.range, self.mutation_span)
 
 
 
@@ -100,19 +127,19 @@ class Population(list):
 		self.rank_probabilities = np.array([(i+1)/(n*(n+1)/2) for i in a])
 
 
-	def evolve(self, strategy:str = "2+2", max_iter:int = 100, precision:float = 1e-2, patience:int = 10) -> "Population":
+	def evolve(self, strategy:str = "2,2", max_iter:int = 100, precision:float = 1e-2, patience:int = 10, parallel:bool = False) -> "Population":
 		assert strategy in ("2+2", "2,2")
 		if strategy == "2+2":
-			return self._evolve_parent_or_child(max_iter, precision, patience)
+			return self._evolve_parent_or_child(max_iter, precision, patience, parallel)
 		if strategy == "2,2":
-			return self._evolve_children_only(max_iter, precision)
+			return self._evolve_children_only(max_iter, precision, parallel)
 	
 	
-	def _evolve_children_only(self, max_iter:int = 100, precision:float = 1e-2) -> "Population":
+	def _evolve_children_only(self, max_iter:int = 100, precision:float = 1e-2, parallel:bool = False) -> "Population":
 		def evolve_population(pop:"Population") -> "Population":
-			pop.calc_fitness()
 			offsprings:list[Chromosome] = list()
 			sorted_pop = sorted(pop)
+			print("current best error =", sorted_pop[0].fitness_value)
 			while len(offsprings) < len(pop):
 				p1, p2 = np.random.choice(len(pop), size=2, p=pop.rank_probabilities)
 				p1 = sorted_pop[p1]
@@ -124,99 +151,31 @@ class Population(list):
 			return Population(offsprings, pop.fitness_func)
 
 		current_pop = self
-		for i in range(max_iter):
+		history = {}
+		for _ in range(max_iter):
+			current_pop.calc_fitness(parallel)
+			for i, chrom in enumerate(sorted(current_pop)):
+				history[i] = history.get(i, []) + [chrom.fitness_value]
 			current_pop = evolve_population(current_pop)
-			
-		return current_pop
+		
+		return history, current_pop
 
 
 
 	def _evolve_parent_or_child(self, max_iter:int = 100, precision:float = 1e-2, patience:int = 10) -> "Population":
 		pass
 
-	def calc_fitness(self) -> None:
+	def calc_fitness(self, parallel:bool = False) -> None:
 		assert self.fitness_func is not None
-		for x in self:
-			fitness = self.fitness_func(x)
-			x.set_fitness(fitness)
+		if not parallel:
+			for x in tqdm(self, position=0, desc="Population", leave=True):
+				fitness = self.fitness_func(x)
+				x.set_fitness(fitness)
+		else:
+			fitness_vals = process_map(self.fitness_func, self, max_workers=min(32, os.cpu_count() + 4, len(self)))
+			for x, f in zip(self, fitness_vals):
+				x.set_fitness(f)
 		
 
 	def __repr__(self) -> str:
 		return "Population(\n\t" + "\n\t".join([repr(x) for x in self]) + "\n)"
-
-
-
-def test_polynom():
-	chromos = [Chromosome([FloatGene() for _ in range(2)]) for _ in range(10)]
-
-	def fitness(chromo:Chromosome) -> float:
-		x, y = chromo.as_tuple()
-		return (x+2)**2 + (y-2) ** 2
-
-	pop = Population(chromos, fitness)
-	print(pop)
-	fitted = pop.evolve("2,2")
-	fitted.calc_fitness()
-	print(Population(sorted(fitted)))
-
-
-def rucksack_problem():
-	rucksack = {
-		"kette": {
-			"value": 4,
-			"weight": 3
-		},
-		"gold": {
-			"value": 7,
-			"weight": 7
-		},
-		"krone": {
-			"value": 5,
-			"weight": 4
-		},
-		"muenze": {
-			"value": 1,
-			"weight": 1
-		},
-		"beil": {
-			"value": 4,
-			"weight": 5
-		},
-		"schwert": {
-			"value": 3,
-			"weight": 4
-		},
-		"ring": {
-			"value": 5,
-			"weight": 2
-		},
-		"kelch": {
-			"value": 1,
-			"weight": 3
-		}
-	}
-	kapa = 9
-
-	def fitness(chromo:Chromosome, print_content:bool = False) -> float:
-		chromo = chromo.as_tuple()
-		lookup = list(rucksack.items())
-		weight = sum([lookup[i][1]["weight"] for i, included in enumerate(chromo) if included == 1])
-		value = sum([lookup[i][1]["value"] for i, included in enumerate(chromo) if included == 1]) 
-		if weight > kapa:
-			return np.inf
-		
-		if print_content:
-			print(weight, value)
-		return 1/(value + 1e-5)
-
-
-	chromos = [Chromosome([BinaryGene() for _ in range(len(rucksack))]) for _ in range(20)]
-	pop = Population(chromos, fitness)
-	print(pop)
-	fitted = pop.evolve("2,2")
-	fitted.calc_fitness()
-	fitted = Population(sorted(fitted))
-	print(fitted)
-	[fitness(x, True) for x in fitted]
-
-rucksack_problem()
